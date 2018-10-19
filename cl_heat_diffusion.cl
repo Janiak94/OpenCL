@@ -1,74 +1,89 @@
 __kernel void
 local_heat_diffusion(
-	__global const double * h,
+	__global double * h,
 	const float c,
 	const unsigned int width,
 	const unsigned int height,
-	__global double * h_updated
+	const unsigned int grid_width,
+	const unsigned int grid_height
 )
 {
-	//thought: handle with global barrier, will only need array that is both input and output
-	unsigned int array_idx = get_global_id(0);
-	unsigned int ix = array_idx/height;
-	unsigned int jx = array_idx%width;
+	uint global_id = get_global_id(0);
+	uint ix = global_id/grid_width;
+	uint jx = global_id%grid_width;
+	double h_local = 0;
 	if(ix > 0 && jx > 0 && ix < height-1 && jx < width-1){
-		h_updated[height*ix+jx] =
-		h[height*ix+jx] + c*((h[height*(ix-1)+jx] + h[height*(ix+1)+jx] +
-			h[height*ix+jx-1] + h[height*ix+jx+1])/4 -
-			h[height*ix+jx]);
-		return;
+		h_local =
+		h[grid_width*ix+jx] + c*((h[grid_width*(ix-1)+jx] + h[grid_width*(ix+1)+jx] +
+			h[grid_width*ix+jx-1] + h[grid_width*ix+jx+1])/4 -
+			h[grid_width*ix+jx]);
 	}
-
-	int local_temp = 0;
-	if(ix > 0){
-		local_temp += h[height*(ix-1)+jx];
+	else if(ix < height && jx < width){
+		int local_temp = 0;
+		if(ix > 0){
+			local_temp += h[grid_width*(ix-1)+jx];
+		}
+		if(jx > 0){
+			local_temp += h[grid_width*ix+jx-1];
+		}
+		if(ix < height-1){
+			local_temp += h[grid_width*(ix+1)+jx];
+		}
+		if(jx < width-1){
+			local_temp += h[grid_width*ix+jx+1];
+		}
+		h_local = h[grid_width*ix+jx] +
+			c*(local_temp/4-h[grid_width*ix+jx]);
 	}
-	if(jx > 0){
-		local_temp += h[height*ix+jx-1];
-	}
-	if(ix < height-1){
-		local_temp += h[height*(ix+1)+jx];
-	}
-	if(jx < width-1){
-		local_temp += h[height*ix+jx+1];
-	}
-	h_updated[height*ix+jx] = h[height*ix+jx] +
-		 c*(local_temp/4-h[height*ix+jx]);
-
+	barrier(CLK_GLOBAL_MEM_FENCE);
+	h[global_id] = h_local;
 }
-
-__kernel void
-move_buffer(
-	__global double * m1,
-	__global const double * m2
-)
-{
-	unsigned int array_idx = get_global_id(0);
-	m1[array_idx] = m2[array_idx];
-}	
 
 __kernel void
 partial_sum(
-	__global const double * h,
-	__local double * local_sum,
-	__global double * partial_sum
+	__global const double * input,
+	__local double * local_sums,
+	__global double * partial_sums
 )
 {
 	uint local_id = get_local_id(0);
-	uint group_size = get_local_size(0);
+  	uint group_size = get_local_size(0);
 
-	//get the local element we wish to add to the average
-	local_sum[local_id] = h[get_global_id(0)];
+  	// Copy from global to local memory
+  	local_sums[local_id] = input[get_global_id(0)];
 
-	//will only work if the number of elements in h is even
-	for(uint i = group_size/2; i > 0; i/=2){
-		barrier(CLK_LOCAL_MEM_FENCE);
-		if(local_id < i){
-			local_sum[local_id] += local_sum[local_id + i];
-		}
-	}
-	
-	if(local_id == 0){
-		partial_sum[get_group_id(0)] = local_sum[0];
-	}
+  	// Loop for computing local_sums : divide workgroup into 2 parts
+  	for (uint i = group_size/2; i>0; i /=2)
+     	{
+      		// Waiting for each 2x2 addition into given workgroup
+      		barrier(CLK_LOCAL_MEM_FENCE);
+
+      		// Add elements 2 by 2 between local_id and local_id + i
+      		if (local_id < i)
+        	local_sums[local_id] += local_sums[local_id + i];
+     	}
+
+  	// Write result into partialSums[nWorkGroups]
+  	if (local_id == 0)
+    		partial_sums[get_group_id(0)] = local_sums[0];
 }
+
+__kernel void
+difference(
+	__global double * input,
+	const int height,
+	const int width,
+	const int grid_width,
+	const double average
+)
+{
+	uint global_id = get_global_id(0);
+	uint ix = global_id/grid_width;
+	uint jx = global_id%grid_width;
+
+	double diff = input[global_id] - average;
+	barrier(CLK_GLOBAL_MEM_FENCE);
+	if(ix < height && jx < width)
+		input[global_id] = (diff < 0 ? -diff : diff);
+}
+

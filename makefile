@@ -1,7 +1,7 @@
 CC=gcc
 STD=-std=c99
 LIBS=-lm -lOpenCL -lrt
-OFLAGS=-O2
+OFLAGS=
 LDIRS=-L/usr/lib64/
 IDIRS=-I/usr/include/
 
