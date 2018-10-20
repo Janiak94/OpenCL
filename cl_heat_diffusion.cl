@@ -1,10 +1,11 @@
 __kernel void
 local_heat_diffusion(
-	__global double * h,
+	__global const double * h,
 	const float c,
 	const unsigned int width,
 	const unsigned int height,
-	const unsigned int grid_width
+	const unsigned int grid_width,
+	__global double * h_updated
 )
 {
 	uint global_id = get_global_id(0);
@@ -12,7 +13,7 @@ local_heat_diffusion(
 	uint jx = global_id%grid_width;
 	double h_local = 0;
 	if(ix > 0 && jx > 0 && ix < height-1 && jx < width-1){
-		h_local =
+		h_updated[global_id] =
 		h[grid_width*ix+jx] + c*((h[grid_width*(ix-1)+jx] + h[grid_width*(ix+1)+jx] +
 			h[grid_width*ix+jx-1] + h[grid_width*ix+jx+1])/4 -
 			h[grid_width*ix+jx]);
@@ -31,11 +32,9 @@ local_heat_diffusion(
 		if(jx < width-1){
 			local_temp += h[grid_width*ix+jx+1];
 		}
-		h_local = h[grid_width*ix+jx] +
+		h_updated[global_id] = h[grid_width*ix+jx] +
 			c*(local_temp/4-h[grid_width*ix+jx]);
 	}
-	barrier(CLK_GLOBAL_MEM_FENCE);
-	h[global_id] = h_local;
 }
 
 __kernel void
@@ -69,11 +68,12 @@ partial_sum(
 
 __kernel void
 difference(
-	__global double * input,
+	__global const double * input,
 	const int height,
 	const int width,
 	const int grid_width,
-	const double average
+	const double average,
+	__global double * output
 )
 {
 	uint global_id = get_global_id(0);
@@ -81,8 +81,7 @@ difference(
 	uint jx = global_id%grid_width;
 
 	double diff = input[global_id] - average;
-	barrier(CLK_GLOBAL_MEM_FENCE);
 	if(ix < height && jx < width)
-		input[global_id] = (diff < 0 ? -diff : diff);
+		output[global_id] = (diff < 0 ? -diff : diff);
 }
 

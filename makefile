@@ -1,7 +1,7 @@
 CC=gcc
 STD=-std=c11
-LIBS=-lm -lOpenCL -lrt
-OFLAGS=-O3
+LIBS=-lm -lOpenCL
+OFLAGS=-O3 -ffast-math
 LDIRS=-L/usr/lib64/
 IDIRS=-I/usr/include/
 ARCH=-march=native
