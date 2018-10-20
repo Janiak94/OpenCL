@@ -8,7 +8,7 @@
 #define GROUP_SIZE 32
 
 /* SIMD summation of a vector */
-static inline double sum_vector(double *vector, size_t len){
+static inline double sum_vector(double vector[], size_t len){
 	__m512d vsum = _mm512_setzero_pd();
 	for(size_t i = 0; i < len; i+=8){
 		__m512d v = _mm512_load_pd(&vector[i]);
