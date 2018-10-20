@@ -240,8 +240,6 @@ int main(int argc, char *argv[]){
 	error_handler("heat kernel arg 3",error);
 	error = clSetKernelArg(kernel_heat, 4, sizeof(unsigned int), &grid_width);
 	error_handler("heat kernel arg 4",error);
-	error = clSetKernelArg(kernel_heat, 5, sizeof(unsigned int), &grid_height);
-	error_handler("heat kernel arg 5",error);
 
 	error = clSetKernelArg(kernel_partial, 0, sizeof(cl_mem), &grid_buffer);
 	error_handler("partial kernel arg 0",error);
