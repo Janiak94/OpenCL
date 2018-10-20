@@ -2,9 +2,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <immintrin.h>
 
 #define MAX_SOURCE_SIZE 100000
 #define GROUP_SIZE 32
+
+/* SIMD summation of a vector */
+static inline double sum_vector(double *vector, size_t len){
+	__m512d vsum = _mm512_setzero_pd();
+	for(size_t i = 0; i < len; i+=8){
+		__m512d v = _mm512_load_pd(&vector[i]);
+		vsum = _mm512_add_pd(vsum,v);
+	}
+	return _mm512_reduce_add_pd(vsum);
+}
 
 /* handles the many potential errors from OpenCL */
 void error_handler(char err[], int code){
@@ -254,12 +265,16 @@ int main(int argc, char *argv[]){
 	error_handler("Error while finish!!",error);
 
 	/* read buffer and sum partial sums and calculate average temperature */
-	double *partial_sums = (double*) malloc(sizeof(double)*n_work_groups), average = 0;
+	double *partial_sums = (double*)aligned_alloc(64,sizeof(double)*n_work_groups);
+	double average, average_diff;
 	error = clEnqueueReadBuffer(command_queue, partial_sums_buffer, CL_TRUE,
 		0, sizeof(double)*n_work_groups,partial_sums, 0, NULL, NULL);
 	error_handler("Error reading partial sums buffer", error);
-	for(size_t ix = 0; ix < n_work_groups; ++ix){
-		average += partial_sums[ix];
+	average = sum_vector(partial_sums,8*(n_work_groups/8));
+	if(n_work_groups%8 != 0){
+		for(size_t i = 8*(n_work_groups/8); i < n_work_groups; ++i){
+			average += partial_sums[i];
+		}
 	}
 	average /= width*height;
 	printf("Average temperature: %.0f\n", average);	
@@ -292,14 +307,15 @@ int main(int argc, char *argv[]){
 	error = clEnqueueReadBuffer(command_queue, partial_sums_buffer, CL_TRUE,
 		0, sizeof(double)*n_work_groups,partial_sums, 0, NULL, NULL);
 	error_handler("Error reading partial sums buffer", error);
-
-	double average_diff = 0;
-	for(size_t ix = 0; ix < n_work_groups; ++ix){
-		average_diff += partial_sums[ix];
+	average_diff = sum_vector(partial_sums,8*(n_work_groups/8));
+	if(n_work_groups%8 != 0){
+		for(size_t i = 8*(n_work_groups/8); i < n_work_groups; ++i){
+			average_diff += partial_sums[i];
+		}
 	}
-	free(partial_sums);
 	average_diff /= width*height;
 	printf("Average temperature difference: %.0f\n", average_diff);	
+
 
 	/* release resources */
 	error = clReleaseCommandQueue(command_queue);
