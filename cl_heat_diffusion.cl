@@ -4,8 +4,7 @@ local_heat_diffusion(
 	const float c,
 	const unsigned int width,
 	const unsigned int height,
-	const unsigned int grid_width,
-	const unsigned int grid_height
+	const unsigned int grid_width
 )
 {
 	uint global_id = get_global_id(0);
