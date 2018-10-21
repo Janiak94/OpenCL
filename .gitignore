@@ -10,6 +10,9 @@
 # Ignore object files
 *.o
 
+# Ignore hidden files
+.*
+
 # Unignore Makefile and makefile
 !Makefile
 !makefile

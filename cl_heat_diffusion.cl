@@ -68,12 +68,11 @@ partial_sum(
 
 __kernel void
 difference(
-	__global const double * input,
+	__global double * input,
 	const int height,
 	const int width,
 	const int grid_width,
-	const double average,
-	__global double * output
+	const double average
 )
 {
 	uint global_id = get_global_id(0);
@@ -82,6 +81,6 @@ difference(
 
 	double diff = input[global_id] - average;
 	if(ix < height && jx < width)
-		output[global_id] = (diff < 0 ? -diff : diff);
+		input[global_id] = (diff < 0 ? -diff : diff);
 }
 
