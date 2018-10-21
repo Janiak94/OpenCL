@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 #include <immintrin.h>
 
 #define MAX_SOURCE_SIZE 100000
@@ -72,6 +73,20 @@ void set_args(
 		}
 		printf("Not a valid argument: %s\n", argv[i]);
 		exit(1);
+	}
+}
+
+/* print formated string with results */
+void print_result(char str[], double result){
+	int log = (int) log10(result);
+	if(log < 6 && log >= 0){
+		printf("%s: %.*f\n",str, 5-log, result);
+	}else if(log >= 6){
+		printf("%s: %.*e\n",str, 5, result);
+	}else if(log > -6 && log < 0){
+		printf("%s: %.*f\n",str, 5, result);
+	}else{
+		printf("%s: %.*e\n",str, 5, result);
 	}
 }
 
@@ -197,8 +212,10 @@ int main(int argc, char *argv[]){
 	free(source_str);
 	
 	/* create kernels */
-	cl_kernel kernel_heat;
-	kernel_heat = clCreateKernel(program, "local_heat_diffusion", &error);
+	cl_kernel kernel_heat[2];
+	kernel_heat[0] = clCreateKernel(program, "local_heat_diffusion", &error);
+	error_handler("Error while creating heat kernel",error);
+	kernel_heat[1] = clCreateKernel(program, "local_heat_diffusion", &error);
 	error_handler("Error while creating heat kernel",error);
 	
 	cl_kernel kernel_partial;
@@ -213,59 +230,74 @@ int main(int argc, char *argv[]){
 	double *grid;
 	initialize_grid(&grid, height, width, &grid_height, &grid_width, initial_central);
 	const size_t global_work_items = grid_height*grid_width;	
-	cl_mem grid_buffer, partial_sums_buffer;
-	grid_buffer = clCreateBuffer(
-		context, CL_MEM_READ_ONLY, sizeof(double)*global_work_items, NULL, &error);
+	cl_mem grid_buffers[2], partial_sums_buffer;
+	grid_buffers[0] = clCreateBuffer(
+		context, CL_MEM_READ_WRITE, sizeof(double)*global_work_items, NULL, &error);
+	error_handler("Error while creating input buffer",error);
+	grid_buffers[1] = clCreateBuffer(
+		context, CL_MEM_READ_WRITE, sizeof(double)*global_work_items, NULL, &error);
 	error_handler("Error while creating input buffer",error);
 
-	cl_mem output_buffer = clCreateBuffer(
-		context, CL_MEM_WRITE_ONLY, sizeof(double)*global_work_items, NULL, &error);
-	error_handler("Error while creating output buffer",error);
-
 	const size_t local_size = GROUP_SIZE;
-	const size_t n_work_groups = global_work_items/local_size;
+	const size_t n_work_groups = global_work_items/local_size+1;
 	partial_sums_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY,
 		sizeof(double)*n_work_groups,NULL,&error);
 	error_handler("Error creating partial sums buffer",error);
 		
-	/* write grid to global memory */
-	error = clEnqueueWriteBuffer(command_queue, grid_buffer, CL_TRUE,
+	/* write grid to global memory (first buffer) */
+	error = clEnqueueWriteBuffer(command_queue, grid_buffers[0], CL_TRUE,
   		0, sizeof(double)*global_work_items, grid, 0, NULL, NULL);
 	error_handler("Error enqueueing grid",error);
 	
 	/* set kernel arguments for heat and summation */
-	error = clSetKernelArg(kernel_heat, 0, sizeof(cl_mem), &grid_buffer);
-	error_handler("heat kernel arg 0",error);
-	error = clSetKernelArg(kernel_heat, 1, sizeof(float), &diffusion_constant);
-	error_handler("heat kernel arg 1",error);
-	error = clSetKernelArg(kernel_heat, 2, sizeof(unsigned int), &width);
-	error_handler("heat kernel arg 2",error);
-	error = clSetKernelArg(kernel_heat, 3, sizeof(unsigned int), &height);
-	error_handler("heat kernel arg 3",error);
-	error = clSetKernelArg(kernel_heat, 4, sizeof(unsigned int), &grid_width);
-	error_handler("heat kernel arg 4",error);
-	error = clSetKernelArg(kernel_heat, 5, sizeof(cl_mem), &output_buffer);
-	error_handler("heat kernel arg 5",error);
+	error = clSetKernelArg(kernel_heat[0], 0, sizeof(cl_mem), &grid_buffers[0]);
+	error_handler("heat kernel 0, arg 0",error);
+	error = clSetKernelArg(kernel_heat[0], 1, sizeof(float), &diffusion_constant);
+	error_handler("heat kernel 0, arg 1",error);
+	error = clSetKernelArg(kernel_heat[0], 2, sizeof(unsigned int), &width);
+	error_handler("heat kernel 0, arg 2",error);
+	error = clSetKernelArg(kernel_heat[0], 3, sizeof(unsigned int), &height);
+	error_handler("heat kernel 0, arg 3",error);
+	error = clSetKernelArg(kernel_heat[0], 4, sizeof(unsigned int), &grid_width);
+	error_handler("heat kernel 0, arg 4",error);
+	error = clSetKernelArg(kernel_heat[0], 5, sizeof(cl_mem), &grid_buffers[1]);
+	error_handler("heat kernel 1, arg 5",error);
+	error = clSetKernelArg(kernel_heat[1], 0, sizeof(cl_mem), &grid_buffers[1]);
+	error_handler("heat kernel 1, arg 0",error);
+	error = clSetKernelArg(kernel_heat[1], 1, sizeof(float), &diffusion_constant);
+	error_handler("heat kernel 1, arg 1",error);
+	error = clSetKernelArg(kernel_heat[1], 2, sizeof(unsigned int), &width);
+	error_handler("heat kernel 1, arg 2",error);
+	error = clSetKernelArg(kernel_heat[1], 3, sizeof(unsigned int), &height);
+	error_handler("heat kernel 1, arg 3",error);
+	error = clSetKernelArg(kernel_heat[1], 4, sizeof(unsigned int), &grid_width);
+	error_handler("heat kernel 1, arg 4",error);
+	error = clSetKernelArg(kernel_heat[1], 5, sizeof(cl_mem), &grid_buffers[0]);
+	error_handler("heat kernel 1, arg 5",error);
 
-	error = clSetKernelArg(kernel_partial, 0, sizeof(cl_mem), &grid_buffer);
+
+	/* calculate heat flow and iterate with two kernels so no need to copy buffers */
+	for(size_t i = 0; i < n_iterations/2; ++i){
+		error = clEnqueueNDRangeKernel(command_queue, kernel_heat[0], 1, NULL,
+  			(const size_t *)&global_work_items, NULL, 0, NULL, NULL);
+		error_handler("Error execute",error);
+		error = clEnqueueNDRangeKernel(command_queue, kernel_heat[1], 1, NULL,
+  			(const size_t *)&global_work_items, NULL, 0, NULL, NULL);
+		error_handler("Error execute",error);
+	}
+	if(n_iterations%2 != 0){
+		error = clEnqueueNDRangeKernel(command_queue, kernel_heat[0], 1, NULL,
+  			(const size_t *)&global_work_items, NULL, 0, NULL, NULL);
+		error_handler("Error execute",error);
+	}		
+
+	error = clSetKernelArg(kernel_partial, 0, sizeof(cl_mem), &grid_buffers[n_iterations%2]);
 	error_handler("partial kernel arg 0",error);
 	error = clSetKernelArg(kernel_partial, 1, local_size*sizeof(cl_double), NULL);
 	error_handler("partial kernel arg 1",error);
 	error = clSetKernelArg(kernel_partial, 2, sizeof(cl_mem), &partial_sums_buffer);
 	error_handler("partial kernel arg 2",error);
 
-	/* calculate heat flow and iterate.
- 	 * Need to use separate buffers since we dont have global synchonization.
- 	 * However this doubles the computation time */
-	for(size_t i = 0; i < n_iterations; ++i){
-		error = clEnqueueNDRangeKernel(command_queue, kernel_heat, 1, NULL,
-  			(const size_t *)&global_work_items, NULL, 0, NULL, NULL);
-		error_handler("Error execute",error);
-		
-		error = clEnqueueCopyBuffer(command_queue, output_buffer, grid_buffer,
-			0,0,global_work_items*sizeof(double),0,NULL,NULL);
-		error_handler("Error copying buffer",error);
-	}
 	/* perform reduction to get partial sums */
 	error = clEnqueueNDRangeKernel(command_queue, kernel_partial, 1, NULL,
 		(const size_t *)&global_work_items, (const size_t *)&local_size, 0, NULL,NULL);
@@ -287,10 +319,10 @@ int main(int argc, char *argv[]){
 		}
 	}
 	average /= width*height;
-	printf("Average temperature: %.0f\n", average);	
+	print_result("Average temperature", average);	
 
 	/* set kernel args */
-	error = clSetKernelArg(kernel_diff, 0, sizeof(cl_mem), &grid_buffer);
+	error = clSetKernelArg(kernel_diff, 0, sizeof(cl_mem), &grid_buffers[n_iterations%2]);
 	error_handler("diff kernel arg 0",error);
 	error = clSetKernelArg(kernel_diff, 1, sizeof(int), &height);
 	error_handler("diff kernel arg 1",error);
@@ -300,16 +332,11 @@ int main(int argc, char *argv[]){
 	error_handler("diff kernel arg 3",error);
 	error = clSetKernelArg(kernel_diff, 4, sizeof(double), &average);
 	error_handler("diff kernel arg 4",error);
-	error = clSetKernelArg(kernel_diff, 5, sizeof(cl_mem), &output_buffer);
-	error_handler("diff kernel arg 5",error);
 	
 	/* calculate difference from average for each grid point and copy over result */
 	error = clEnqueueNDRangeKernel(command_queue, kernel_diff, 1, NULL, (const size_t *)&global_work_items,
 		NULL, 0, NULL, NULL);
 	error_handler("Error while executing diff kernel",error);
-	error = clEnqueueCopyBuffer(command_queue, output_buffer, grid_buffer,
-		0,0,global_work_items*sizeof(double),0,NULL,NULL);
-	error_handler("Error copying buffer",error);
 
 	/* perform reduction on average difference, read buffers, sum and calculate average */
 	error = clEnqueueNDRangeKernel(command_queue, kernel_partial, 1, NULL,
@@ -329,16 +356,17 @@ int main(int argc, char *argv[]){
 		}
 	}
 	average_diff /= width*height;
-	printf("Average temperature difference: %.0f\n", average_diff);	
+	print_result("Average temperature difference", average_diff);	
 
 	/* release resources */
 	error = clReleaseCommandQueue(command_queue);
 	error = clReleaseContext(context);
 	error = clReleaseProgram(program);
 	error = clReleaseMemObject(partial_sums_buffer);
-	error = clReleaseMemObject(grid_buffer);
-	error = clReleaseMemObject(output_buffer);
-	error = clReleaseKernel(kernel_heat);
+	error = clReleaseMemObject(grid_buffers[0]);
+	error = clReleaseMemObject(grid_buffers[1]);
+	error = clReleaseKernel(kernel_heat[0]);
+	error = clReleaseKernel(kernel_heat[1]);
 	error = clReleaseKernel(kernel_partial);
 	error = clReleaseKernel(kernel_diff);
 	return 0;
