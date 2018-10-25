@@ -65,3 +65,5 @@ too much work for the CPU to handle. Though if larger grids were being used the 
 |number of iterations|100 000|1000|200|
 |goal time|1.7s|98s|1.4s|
 |actual run time|0.75s|8.86s|0.69s|
+
+However our implementation lacks numerical precision and that is probably the reason for the time performance. With the larger initial values and when the number of iterations is large, double precision isn't enough to fully describe the temperatures.
