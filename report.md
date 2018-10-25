@@ -33,7 +33,7 @@ Within the main file we have the following functions
 In the kernel file we have the following functions
 - local_heat_diffusion(__global const double *h, const float c, const uint width, const uint height, const uint grid_width, __global double *h_updated)
   Performs a single step of the heat diffusion with the input h and outputs to h_updated. This is necessary since we can only
-  synchronize inside the work group, but some work items will have to access intries outside their work group.
+  synchronize inside the work group, but some work items will have to access entries outside their work group.
   Both h and h_updated are stored in global memory.
   c is the heat diffusion constant, width is the effective grid width, height is the effective grid height, i.e the ones set from
   the command line.
